@@ -1,0 +1,114 @@
+---
+title: "RNASeqWorkflow"
+author: "SKammlade"
+date: "December 14, 2016"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+R Markdown document working through RNA-Seq workflow: gene-level exploratory analysis and differential expression by M.Love et. al <https://f1000research.com/articles/4-1070>.
+
+####Locating Alignment Files
+
+```{r message=FALSE}
+library("airway")
+dir <- system.file("extdata", 
+                   package="airway", 
+                   mustWork = TRUE)
+```
+
+```{r }
+list.files(dir)
+```
+
+
+Table with detailed information for each of the samples linking samples to the associated FASTQ and BAM files
+```{r }
+csvfile <- file.path(dir, "sample_table.csv")
+(sampleTable <- read.csv(csvfile, row.names=1))
+```
+
+
+Using 'Run' column from sampleTable, construct full paths to the files we want to perform the counting operation on (the 8 BAM files)
+```{r }
+filenames <- file.path(dir, paste0(sampleTable$Run, "_subset.bam"))
+file.exists(filenames)
+```
+
+Using the *BamFileList* function in the *Rsamtools* package, indicate in Bioconductor that these selected files are BAM files. Also specify to only process 2million reads at a time.
+```{r message=FALSE}
+library("Rsamtools")
+bamfiles <- BamFileList(filenames, yieldSize=2000000)
+```
+
+**Note:** make sure that the chromosome names of the genomic features in the annotation you use are consistent with the chromosome names of the reference used for read alignment. Otherwise, the scripts might fail to count any reads to features due to the mismatching names. For example, a common mistake is when the alignment files contain chromosome names in the style of 1 and the gene annotation in the style of chr1, or the other way around. See the seqlevelsStyle function in the GenomeInfoDb package for solutions. We can check the chromosome names (here called “seqnames”) in the alignment files like so:
+```{r}
+seqinfo(bamfiles[1])
+```
+
+####Defining Gene Models
+
+```{r message=FALSE}
+library("GenomicFeatures")
+#library(BiocInstaller)
+#biocLite("XML")
+```
+
+Read in the gene model and indiace none of the chromosomes are circular by using a 0-length character vector
+```{r message=FALSE}
+gtffile <- file.path(dir,"Homo_sapiens.GRCh37.75_subset.gtf")
+(txdb <- makeTxDbFromGFF(gtffile, format="gtf", circ_seqs=character()))
+```
+
+List of all the exons grouped by gene
+```{r message=FALSE}
+(ebg <- exonsBy(txdb, by="gene"))
+```
+
+
+####Read counting step
+
+```{r message=FALSE}
+library("GenomicAlignments")
+library("BiocParallel")
+```
+
+
+```{r message=FALSE}
+register(SerialParam())
+se <- summarizeOverlaps(features=ebg, reads=bamfiles,
+                        mode="Union",
+                        singleEnd=FALSE,
+                        ignore.strand=TRUE, 
+                        fragments=TRUE)
+```
+
+#### SummarizedExperiment
+
+```{r message=FALSE}
+se
+```
+
+```{r message=FALSE}
+dim(se)
+```
+
+```{r message=FALSE}
+assayNames(se)
+```
+
+```{r message=FALSE}
+head(assay(se), 3)
+```
+
+```{r message=FALSE}
+colSums(assay(se))
+```
+
+```{r message=FALSE}
+rowRanges(se)
+```
+
